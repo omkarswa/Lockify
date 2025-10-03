@@ -8,17 +8,19 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 // ---------- Normal Register ----------
 export const registerUser = async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password, admin } = req.body;
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const newUser = new User({
       username,
       email,
       password: hashedPassword,
+      role: admin ? "admin" : "user", // assign role dynamically
     });
 
     await newUser.save();
-    res.status(201).json({ message: "User registered successfully!" });
+    res.status(201).json({ message: "User registered successfully!", user: newUser });
   } catch (error) {
     console.error("Register Error:", error);
     res.status(500).json({ error: error.message });
@@ -30,9 +32,8 @@ export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (!email || !password)
       return res.status(400).json({ message: "Email and password are required" });
-    }
 
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ message: "User not found" });
@@ -52,10 +53,10 @@ export const loginUser = async (req, res) => {
       user: {
         id: user._id,
         username: user.username,
-        email: user.email
-      }
+        email: user.email,
+        role: user.role,
+      },
     });
-
   } catch (err) {
     console.error("Login Error:", err);
     res.status(500).json({ message: "Server error", error: err.message });
@@ -67,9 +68,9 @@ export const googleAuth = async (req, res) => {
   try {
     const { tokenId } = req.body;
 
-    if (!tokenId) return res.status(400).json({ message: "Token ID is required" });
+    if (!tokenId)
+      return res.status(400).json({ message: "Token ID is required" });
 
-    // 1️⃣ Verify Google token
     const ticket = await client.verifyIdToken({
       idToken: tokenId,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -77,49 +78,37 @@ export const googleAuth = async (req, res) => {
 
     const { email, name, sub: googleId } = ticket.getPayload();
 
-    // 2️⃣ Check if user exists
     let user = await User.findOne({ email });
 
     if (!user) {
-      // 3️⃣ First time Google login → create new user
       user = new User({
         username: name,
         email,
         password: "", // Google login → no password
         googleId,
+        role: "user", // default role
       });
       await user.save();
     }
 
-    // 4️⃣ Generate JWT
     const token = jwt.sign(
       { id: user._id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
 
-    // 5️⃣ Return token + user info
- // 5️⃣ Return token + user info
-console.log("Google payload:", { email, name, googleId });
-console.log("User found or created:", user);
-
-res.status(200).json({
-  message: "Google login successful",
-  token,
-  user: {
-    id: user._id,
-    username: user.username,
-    email: user.email,
-  },
-});
-
+    res.status(200).json({
+      message: "Google login successful",
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
+    });
   } catch (err) {
     console.error("Google Auth Error:", err);
     res.status(500).json({ message: "Google auth failed", error: err.message });
   }
-
-console.log("Google payload:", { email, googleId });
-console.log("User found or created:", user);
-
-
 };
